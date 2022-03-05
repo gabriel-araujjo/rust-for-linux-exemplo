@@ -64,9 +64,13 @@ impl FileOperations for Exemplo {
         Ok(data.clone())
     }
 
-    fn read(_this: RefBorrow<'_, Dispositivo>, _file: &File, _data: &mut impl IoBufferWriter, _offset: u64) -> Result<usize> {
-        
-        Ok(0)
+    fn read(this: RefBorrow<'_, Dispositivo>, _file: &File, data: &mut impl IoBufferWriter, offset: u64) -> Result<usize> {
+        let offset = offset.try_into()?;
+        let guard = this.conteudo.lock();
+        let len = core::cmp::min(data.len(), guard.dados.len().saturating_sub(offset));
+
+        data.write_slice(&guard.dados[offset..][..len])?;
+        Ok(len)
     }
 
     fn write(this: RefBorrow<'_, Dispositivo>,  _file: &File, data: &mut impl IoBufferReader,  _offset: u64) -> Result<usize> {
