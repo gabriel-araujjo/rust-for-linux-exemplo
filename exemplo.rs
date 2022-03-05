@@ -8,7 +8,7 @@ use kernel::file_operations::FileOperations;
 use kernel::io_buffer::{IoBufferReader, IoBufferWriter};
 use kernel::prelude::*;
 use kernel::miscdev;
-use kernel::sync::{Ref, RefBorrow};
+use kernel::sync::{Ref, RefBorrow, Mutex, UniqueRef};
 
 module! {
     type: Exemplo,
@@ -16,13 +16,37 @@ module! {
     license: b"GPL v2",
 }
 
+struct  Conteudo {
+    dados: Vec<u8>,
+}
+
 struct Dispositivo {
     numero: usize,
+    conteudo: Mutex<Conteudo>,
 }
 
 impl Dispositivo {
     fn try_new(numero: usize) -> Result<Ref<Self>> {
-        Ref::try_new(Dispositivo { numero })
+        let mut dev = Pin::from(UniqueRef::try_new(
+            Dispositivo { 
+                numero,
+                // SAFETY: `mutex_init` é chamado a baixo
+                conteudo: unsafe { 
+                    Mutex::new(Conteudo {
+                        dados: Vec::new(),
+                    }) 
+                },
+            }
+        )?);
+        
+        // SAFETY: Conteudo está fixado quando dispositivo também está
+        let m = unsafe {
+            dev.as_mut().map_unchecked_mut(|d| &mut d.conteudo)
+        };
+
+        kernel::mutex_init!(m, "dev::content");
+
+        return Ok(dev.into());
     }
 }
 
@@ -45,8 +69,11 @@ impl FileOperations for Exemplo {
         Ok(0)
     }
 
-    fn write(_this: RefBorrow<'_, Dispositivo>,  _file: &File, data: &mut impl IoBufferReader,  _offset: u64) -> Result<usize> {
-        Ok(data.len())
+    fn write(this: RefBorrow<'_, Dispositivo>,  _file: &File, data: &mut impl IoBufferReader,  _offset: u64) -> Result<usize> {
+        let copia = data.read_all()?;
+        let len = copia.len();
+        this.conteudo.lock().dados = copia;
+        Ok(len)
     }
 }
 
